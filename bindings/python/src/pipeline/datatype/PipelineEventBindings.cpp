@@ -58,8 +58,10 @@ void bind_pipelineevent(pybind11::module& m, void* pCallstack) {
         .def_readwrite("source", &PipelineEvent::source, DOC(dai, PipelineEvent, source))
         .def("getTimestamp", &PipelineEvent::Buffer::getTimestamp, DOC(dai, Buffer, getTimestamp))
         .def("getTimestampDevice", &PipelineEvent::Buffer::getTimestampDevice, DOC(dai, Buffer, getTimestampDevice))
+        .def("getTimestampSystem", &PipelineEvent::Buffer::getTimestampSystem, DOC(dai, Buffer, getTimestampSystem))
         .def("getSequenceNum", &PipelineEvent::Buffer::getSequenceNum, DOC(dai, Buffer, getSequenceNum))
         .def("setTimestamp", &PipelineEvent::setTimestamp, DOC(dai, Buffer, setTimestamp))
         .def("setTimestampDevice", &PipelineEvent::setTimestampDevice, DOC(dai, Buffer, setTimestampDevice))
+        .def("setTimestampSystem", &PipelineEvent::setTimestampSystem, DOC(dai, Buffer, setTimestampSystem))
         .def("setSequenceNum", &PipelineEvent::setSequenceNum, DOC(dai, Buffer, setSequenceNum));
 }

@@ -34,7 +34,11 @@ class PipelineEventAggregationConfig : public Buffer {
         return DatatypeEnum::PipelineEventAggregationConfig;
     }
 
+    #ifndef DEPTHAI_MESSAGES_RVC2
+    DEPTHAI_SERIALIZE(PipelineEventAggregationConfig, Buffer::ts, Buffer::tsDevice, Buffer::sequenceNum, nodes, repeatIntervalSeconds, Buffer::tsSystem);
+    #else
     DEPTHAI_SERIALIZE(PipelineEventAggregationConfig, Buffer::ts, Buffer::tsDevice, Buffer::sequenceNum, nodes, repeatIntervalSeconds);
+    #endif
 };
 
 }  // namespace dai

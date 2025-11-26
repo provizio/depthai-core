@@ -186,7 +186,18 @@ class SpatialImgDetections : public ImgDetectionsT<SpatialImgDetection>, public 
     ProtoSerializable::SchemaPair serializeSchema() const override;
 #endif
 
-    DEPTHAI_SERIALIZE(SpatialImgDetections,
+    #ifndef DEPTHAI_MESSAGES_RVC2
+        DEPTHAI_SERIALIZE(SpatialImgDetections,
+                      Base::Buffer::sequenceNum,
+                      Base::Buffer::ts,
+                      Base::Buffer::tsDevice,
+                      detections,
+                      transformation,
+                      segmentationMaskWidth,
+                      segmentationMaskHeight,
+                      Buffer::tsSystem);
+    #else
+        DEPTHAI_SERIALIZE(SpatialImgDetections,
                       Base::Buffer::sequenceNum,
                       Base::Buffer::ts,
                       Base::Buffer::tsDevice,
@@ -194,6 +205,7 @@ class SpatialImgDetections : public ImgDetectionsT<SpatialImgDetection>, public 
                       transformation,
                       segmentationMaskWidth,
                       segmentationMaskHeight);
+    #endif
 };
 
 }  // namespace dai
