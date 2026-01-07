@@ -800,6 +800,13 @@ void PipelineImpl::start() {
     //     }
     // }
 
+    // Starts pipeline, go through all nodes and start them
+    for(const auto& node : getAllNodes()) {
+        if(node->runOnHost()) {
+            node->buildInternalQueues();
+        }
+    }
+
     // Implicitly build (if not already)
     build();
 
