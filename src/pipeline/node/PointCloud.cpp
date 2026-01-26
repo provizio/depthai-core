@@ -7,298 +7,247 @@
 #include "depthai/pipeline/datatype/ImgFrame.hpp"
 #include "depthai/pipeline/datatype/PointCloudData.hpp"
 #include "depthai/common/DepthUnit.hpp"
-#include "common/Point3f.hpp"
 #include "pipeline/ThreadedNodeImpl.hpp"
 #include "device/CalibrationHandler.hpp"
 
 #ifdef DEPTHAI_ENABLE_KOMPUTE
     #include "depthai/shaders/depth2pointcloud.hpp"
-    #include "kompute/Kompute.hpp"
 #endif
 #include "utility/PimplImpl.hpp"
 
 namespace dai {
 namespace node {
 
-class PointCloud::Impl {
-   public:
-    Impl() = default;
-    
-    void setLogger(std::shared_ptr<spdlog::logger> log) {
-        logger = log;
-    }
-    
-    // Compute DENSE point cloud (width * height points, includes invalid z=0 or negative)
-    void computePointCloudDense(const uint8_t* depthData, std::vector<Point3f>& points) {
-        if(!intrinsicsSet) {
-            throw std::runtime_error("Intrinsics not set");
-        }
-        
-        // Pre-allocate for dense point cloud (all pixels)
-        points.resize(size);
-        
-        switch(computeMethod) {
-            case ComputeMethod::CPU:
-                computePointCloudDenseCPU(depthData, points);
-                break;
-            case ComputeMethod::CPU_MT:
-                computePointCloudDenseCPUMT(depthData, points);
-                break;
-            case ComputeMethod::GPU:
-                computePointCloudDenseGPU(depthData, points);
-                break;
-        }
-    }
-    
-    // Apply extrinsic transformation to points
-    // Currently all methods use the same CPU-based transformation
-    void applyTransformation(std::vector<Point3f>& points) {
-        if(!hasExtrinsics) {
-            return;  // No transformation needed
-        }
-        
-        switch(computeMethod) {
-            case ComputeMethod::CPU:
-                transformPointsCPU(points);
-                break;
-            case ComputeMethod::CPU_MT:
-                transformPointsCPU(points);  // TODO: Multi-threaded version
-                break;
-            case ComputeMethod::GPU:
-                transformPointsCPU(points);  // TODO: GPU version
-                break;
-        }
-    }
-    
-    // Filter dense points to sparse (only z > 0)
-    std::vector<Point3f> filterValidPoints(const std::vector<Point3f>& densePoints) {
-        std::vector<Point3f> sparsePoints;
-        sparsePoints.reserve(densePoints.size() / 2);  // Estimate ~50% valid
-        
-        for(const auto& p : densePoints) {
-            if(p.z > 0.0f) {
-                sparsePoints.push_back(p);
-            }
-        }
-        
-        return sparsePoints;
-    }
-    
-    void setDepthUnit(dai::DepthUnit depthUnit) {
-        depthUnitMultiplier = getDepthUnitMultiplier(depthUnit);
-        
-        constexpr float MM_MULTIPLIER = getDepthUnitMultiplier(DepthUnit::MILLIMETER);
-        constexpr float CM_MULTIPLIER = getDepthUnitMultiplier(DepthUnit::CENTIMETER);
-        
-        scaleFactor = depthUnitMultiplier / MM_MULTIPLIER;
-        translationScaleFactor = depthUnitMultiplier / CM_MULTIPLIER;
-        
-        if(logger) {
-            logger->debug("Set depth unit: multiplier={}, scaleFactor={}, translationScaleFactor={}", 
-                        depthUnitMultiplier, scaleFactor, translationScaleFactor);
-        }
-    }
-    
-    void useCPU() {
-        computeMethod = ComputeMethod::CPU;
-    }
-    
-    void useCPUMT(uint32_t numThreads) {
-        threadNum = numThreads;
-        computeMethod = ComputeMethod::CPU_MT;
-    }
-    
-    void useGPU(uint32_t device) {
-        initializeGPU(device);
-    }
-    
-    void setIntrinsics(float fx, float fy, float cx, float cy, unsigned int width, unsigned int height) {
-        this->fx = fx;
-        this->fy = fy;
-        this->cx = cx;
-        this->cy = cy;
-        this->width = width;
-        this->height = height;
-        size = this->width * this->height;
-        intrinsicsSet = true;
-    }
-    
-    void setExtrinsics(const std::vector<std::vector<float>>& transformMatrix) {
-        if(transformMatrix.size() != 4 || transformMatrix[0].size() != 4) {
-            throw std::runtime_error("Transformation matrix must be 4x4");
-        }
-        extrinsics = transformMatrix;
-        hasExtrinsics = true;
-    }
-
-   private:
-    void initializeGPU(uint32_t device) {
-#ifdef DEPTHAI_ENABLE_KOMPUTE
-        mgr = std::make_shared<kp::Manager>(device);
-        shader = std::vector<uint32_t>(shaders::DEPTH2POINTCLOUD_COMP_SPV.begin(), shaders::DEPTH2POINTCLOUD_COMP_SPV.end());
-        computeMethod = ComputeMethod::GPU;
-#else
-        (void)device;
-        throw std::runtime_error("Kompute not enabled in this build");
-#endif
-    }
-    
-    // CPU-based transformation (current implementation)
-    void transformPointsCPU(std::vector<Point3f>& points) {
-        for(auto& p : points) {
-            // Only transform valid points
-            if(p.z > 0.0f) {
-                p.x = extrinsics[0][0] * p.x + extrinsics[0][1] * p.y + extrinsics[0][2] * p.z + extrinsics[0][3] * translationScaleFactor;
-                p.y = extrinsics[1][0] * p.x + extrinsics[1][1] * p.y + extrinsics[1][2] * p.z + extrinsics[1][3] * translationScaleFactor;
-                p.z = extrinsics[2][0] * p.x + extrinsics[2][1] * p.y + extrinsics[2][2] * p.z + extrinsics[2][3] * translationScaleFactor;
-            }
-        }
-    }
-    
-    // Dense computation methods (keep all pixels, set z=0 for invalid)
-    void calcPointsChunkDense(const uint8_t* depthData, std::vector<Point3f>& points, unsigned int startRow, unsigned int endRow) {
-        float scale = scaleFactor;
-
-        for(unsigned int row = startRow; row < endRow; row++) {
-            unsigned int rowStart = row * width;
-            for(unsigned int col = 0; col < width; col++) {
-                size_t i = rowStart + col;
-
-                uint16_t depthValue = *(reinterpret_cast<const uint16_t*>(depthData + i * 2));
-                float z = static_cast<float>(depthValue) * scale;
-
-                // Keep invalid points with z = 0 (dense point cloud)
-                float xCoord = 0.0f;
-                float yCoord = 0.0f;
-                
-                if(z > 0.0f) {
-                    // Back-project pixel to 3D using camera intrinsics
-                    xCoord = (col - cx) * z / fx;
-                    yCoord = (row - cy) * z / fy;
-                }
-                
-                //NOTE: Is used for filtering later
-                points[i] = Point3f{xCoord, yCoord, z};
-            }
-        }
-    }
-
-    void computePointCloudDenseCPU(const uint8_t* depthData, std::vector<Point3f>& points) {
-        calcPointsChunkDense(depthData, points, 0, height);
-    }
-
-    void computePointCloudDenseCPUMT(const uint8_t* depthData, std::vector<Point3f>& points) {
-        unsigned int rowsPerThread = height / threadNum;
-        std::vector<std::future<void>> futures;
-
-        auto processRows = [&](unsigned int startRow, unsigned int endRow) {
-            calcPointsChunkDense(depthData, points, startRow, endRow);
-        };
-
-        for(uint32_t t = 0; t < threadNum; ++t) {
-            unsigned int startRow = t * rowsPerThread;
-            unsigned int endRow = (t == threadNum - 1) ? height : (startRow + rowsPerThread);
-            futures.emplace_back(std::async(std::launch::async, processRows, startRow, endRow));
-        }
-
-        for(auto& f : futures) {
-            f.get();
-        }
-    }
-    
-    void computePointCloudDenseGPU(const uint8_t* depthData, std::vector<Point3f>& points) {
-#ifdef DEPTHAI_ENABLE_KOMPUTE
-        std::vector<float> xyzOut;
-        xyzOut.resize(size * 3);
-
-        float scale = scaleFactor;
-
-        std::vector<float> depthDataFloat(size);
-        for(size_t i = 0; i < size; i++) {
-            uint16_t depthValue = *(reinterpret_cast<const uint16_t*>(depthData + i * 2));
-            depthDataFloat[i] = static_cast<float>(depthValue);
-        }
-
-        std::vector<float> intrinsics = {fx, fy, cx, cy, scale, static_cast<float>(width), static_cast<float>(height)};
-
-        if(!tensorsInitialized) {
-            depthTensor = mgr->tensor(depthDataFloat);
-            intrinsicsTensor = mgr->tensor(intrinsics);
-            xyzTensor = mgr->tensor(xyzOut);
-            tensorsInitialized = true;
-        } else {
-            depthTensor->setData(depthDataFloat);
-        }
-        
-        if(!algoInitialized) {
-            tensors.emplace_back(depthTensor);
-            tensors.emplace_back(intrinsicsTensor);
-            tensors.emplace_back(xyzTensor);
-            algo = mgr->algorithm(tensors, shader);
-            algoInitialized = true;
-        }
-        
-        mgr->sequence()->record<kp::OpSyncDevice>(tensors)->record<kp::OpAlgoDispatch>(algo)->record<kp::OpSyncLocal>(tensors)->eval();
-        
-        xyzOut = xyzTensor->vector<float>();
-        
-        // Store ALL points (dense), including invalid ones with z=0
-        for(size_t i = 0; i < size; i++) {
-            points[i].x = xyzOut[i * 3 + 0];
-            points[i].y = xyzOut[i * 3 + 1];
-            points[i].z = xyzOut[i * 3 + 2];
-        }
-#else
-        (void)depthData;
-        (void)points;
-        throw std::runtime_error("Kompute not enabled in this build");
-#endif
-    }
-    
-    enum class ComputeMethod { CPU, CPU_MT, GPU };
-    ComputeMethod computeMethod = ComputeMethod::CPU;
-    
-#ifdef DEPTHAI_ENABLE_KOMPUTE
-    std::shared_ptr<kp::Manager> mgr;
-    std::vector<uint32_t> shader;
-    std::shared_ptr<kp::Algorithm> algo;
-    std::shared_ptr<kp::Tensor> depthTensor;
-    std::shared_ptr<kp::Tensor> intrinsicsTensor;
-    std::shared_ptr<kp::Tensor> xyzTensor;
-    std::vector<std::shared_ptr<kp::Memory>> tensors;
-    bool algoInitialized = false;
-    bool tensorsInitialized = false;
-#endif
-    
-    static constexpr float DEFAULT_DEPTH_UNIT_MULTIPLIER = getDepthUnitMultiplier(DepthUnit::MILLIMETER);
-    static constexpr float MM_MULTIPLIER = getDepthUnitMultiplier(DepthUnit::MILLIMETER);
-    static constexpr float CM_MULTIPLIER = getDepthUnitMultiplier(DepthUnit::CENTIMETER);
-    
-    float scaleFactor = DEFAULT_DEPTH_UNIT_MULTIPLIER / MM_MULTIPLIER;
-    float translationScaleFactor = DEFAULT_DEPTH_UNIT_MULTIPLIER / CM_MULTIPLIER;
-    float depthUnitMultiplier = DEFAULT_DEPTH_UNIT_MULTIPLIER;
-    
-    float fx, fy, cx, cy;
-    unsigned int width, height;
-    size_t size;
-    bool intrinsicsSet = false;
-    uint32_t threadNum = 2;
-    
-    std::vector<std::vector<float>> extrinsics;
-    bool hasExtrinsics = false;
-    
-    std::shared_ptr<spdlog::logger> logger;
-};
-
-// Constructor - initialize pimpl directly without arguments
-PointCloud::PointCloud() 
-    : pimplPointCloud() {  // Default constructor will call Impl()
+// PointCloud::Impl method implementations
+void PointCloud::Impl::setLogger(std::shared_ptr<spdlog::logger> log) {
+    logger = log;
 }
 
-// Destructor
+void PointCloud::Impl::computePointCloudDense(const uint8_t* depthData, std::vector<Point3f>& points) {
+    if(!intrinsicsSet) {
+        throw std::runtime_error("Intrinsics not set");
+    }
+    
+    points.resize(size);
+    
+    switch(computeMethod) {
+        case ComputeMethod::CPU:
+            computePointCloudDenseCPU(depthData, points);
+            break;
+        case ComputeMethod::CPU_MT:
+            computePointCloudDenseCPUMT(depthData, points);
+            break;
+        case ComputeMethod::GPU:
+            computePointCloudDenseGPU(depthData, points);
+            break;
+    }
+}
+
+void PointCloud::Impl::applyTransformation(std::vector<Point3f>& points) {
+    if(!hasExtrinsics) {
+        return;
+    }
+    
+    switch(computeMethod) {
+        case ComputeMethod::CPU:
+            transformPointsCPU(points);
+            break;
+        case ComputeMethod::CPU_MT:
+            transformPointsCPU(points);
+            break;
+        case ComputeMethod::GPU:
+            transformPointsCPU(points);
+            break;
+    }
+}
+
+std::vector<Point3f> PointCloud::Impl::filterValidPoints(const std::vector<Point3f>& densePoints) {
+    std::vector<Point3f> sparsePoints;
+    sparsePoints.reserve(densePoints.size() / 2);
+    
+    for(const auto& p : densePoints) {
+        if(p.z > 0.0f) {
+            sparsePoints.push_back(p);
+        }
+    }
+    
+    return sparsePoints;
+}
+
+void PointCloud::Impl::setDepthUnit(dai::DepthUnit depthUnit) {
+    depthUnitMultiplier = getLengthUnitMultiplier(depthUnit);
+    
+    constexpr float MM_MULTIPLIER = getLengthUnitMultiplier(DepthUnit::MILLIMETER);
+    constexpr float CM_MULTIPLIER = getLengthUnitMultiplier(DepthUnit::CENTIMETER);
+    
+    scaleFactor = depthUnitMultiplier / MM_MULTIPLIER;
+    translationScaleFactor = depthUnitMultiplier / CM_MULTIPLIER;
+    
+    if(logger) {
+        logger->debug("Set depth unit: multiplier={}, scaleFactor={}, translationScaleFactor={}", 
+                    depthUnitMultiplier, scaleFactor, translationScaleFactor);
+    }
+}
+
+void PointCloud::Impl::useCPU() {
+    computeMethod = ComputeMethod::CPU;
+}
+
+void PointCloud::Impl::useCPUMT(uint32_t numThreads) {
+    threadNum = numThreads;
+    computeMethod = ComputeMethod::CPU_MT;
+}
+
+void PointCloud::Impl::useGPU(uint32_t device) {
+    initializeGPU(device);
+}
+
+void PointCloud::Impl::setIntrinsics(float fx, float fy, float cx, float cy, unsigned int width, unsigned int height) {
+    this->fx = fx;
+    this->fy = fy;
+    this->cx = cx;
+    this->cy = cy;
+    this->width = width;
+    this->height = height;
+    size = this->width * this->height;
+    intrinsicsSet = true;
+}
+
+void PointCloud::Impl::setExtrinsics(const std::vector<std::vector<float>>& transformMatrix) {
+    if(transformMatrix.size() != 4 || transformMatrix[0].size() != 4) {
+        throw std::runtime_error("Transformation matrix must be 4x4");
+    }
+    extrinsics = transformMatrix;
+    hasExtrinsics = true;
+}
+
+void PointCloud::Impl::initializeGPU(uint32_t device) {
+#ifdef DEPTHAI_ENABLE_KOMPUTE
+    mgr = std::make_shared<kp::Manager>(device);
+    shader = std::vector<uint32_t>(shaders::DEPTH2POINTCLOUD_COMP_SPV.begin(), shaders::DEPTH2POINTCLOUD_COMP_SPV.end());
+    computeMethod = ComputeMethod::GPU;
+#else
+    (void)device;
+    throw std::runtime_error("Kompute not enabled in this build");
+#endif
+}
+
+void PointCloud::Impl::transformPointsCPU(std::vector<Point3f>& points) {
+    for(auto& p : points) {
+        if(p.z > 0.0f) {
+            float x = extrinsics[0][0] * p.x + extrinsics[0][1] * p.y + extrinsics[0][2] * p.z + extrinsics[0][3] * translationScaleFactor;
+            float y = extrinsics[1][0] * p.x + extrinsics[1][1] * p.y + extrinsics[1][2] * p.z + extrinsics[1][3] * translationScaleFactor;
+            float z = extrinsics[2][0] * p.x + extrinsics[2][1] * p.y + extrinsics[2][2] * p.z + extrinsics[2][3] * translationScaleFactor;
+            
+            p.x = x;
+            p.y = y;
+            p.z = z;
+        }
+    }
+}
+
+void PointCloud::Impl::calcPointsChunkDense(const uint8_t* depthData, std::vector<Point3f>& points, unsigned int startRow, unsigned int endRow) {
+    float scale = scaleFactor;
+
+    for(unsigned int row = startRow; row < endRow; row++) {
+        unsigned int rowStart = row * width;
+        for(unsigned int col = 0; col < width; col++) {
+            size_t i = rowStart + col;
+
+            uint16_t depthValue = *(reinterpret_cast<const uint16_t*>(depthData + i * 2));
+            float z = static_cast<float>(depthValue) * scale;
+
+            float xCoord = 0.0f;
+            float yCoord = 0.0f;
+            
+            if(z > 0.0f) {
+                xCoord = (col - cx) * z / fx;
+                yCoord = (row - cy) * z / fy;
+            }
+            
+            points[i] = Point3f{xCoord, yCoord, z};
+        }
+    }
+}
+
+void PointCloud::Impl::computePointCloudDenseCPU(const uint8_t* depthData, std::vector<Point3f>& points) {
+    calcPointsChunkDense(depthData, points, 0, height);
+}
+
+void PointCloud::Impl::computePointCloudDenseCPUMT(const uint8_t* depthData, std::vector<Point3f>& points) {
+    unsigned int rowsPerThread = height / threadNum;
+    std::vector<std::future<void>> futures;
+
+    auto processRows = [&](unsigned int startRow, unsigned int endRow) {
+        calcPointsChunkDense(depthData, points, startRow, endRow);
+    };
+
+    for(uint32_t t = 0; t < threadNum; ++t) {
+        unsigned int startRow = t * rowsPerThread;
+        unsigned int endRow = (t == threadNum - 1) ? height : (startRow + rowsPerThread);
+        futures.emplace_back(std::async(std::launch::async, processRows, startRow, endRow));
+    }
+
+    for(auto& f : futures) {
+        f.get();
+    }
+}
+
+void PointCloud::Impl::computePointCloudDenseGPU(const uint8_t* depthData, std::vector<Point3f>& points) {
+#ifdef DEPTHAI_ENABLE_KOMPUTE
+    std::vector<float> xyzOut;
+    xyzOut.resize(size * 3);
+
+    float scale = scaleFactor;
+
+    std::vector<float> depthDataFloat(size);
+    for(size_t i = 0; i < size; i++) {
+        uint16_t depthValue = *(reinterpret_cast<const uint16_t*>(depthData + i * 2));
+        depthDataFloat[i] = static_cast<float>(depthValue);
+    }
+
+    std::vector<float> intrinsics = {fx, fy, cx, cy, scale, static_cast<float>(width), static_cast<float>(height)};
+
+    if(!tensorsInitialized) {
+        depthTensor = mgr->tensor(depthDataFloat);
+        intrinsicsTensor = mgr->tensor(intrinsics);
+        xyzTensor = mgr->tensor(xyzOut);
+        tensorsInitialized = true;
+    } else {
+        depthTensor->setData(depthDataFloat);
+    }
+    
+    if(!algoInitialized) {
+        tensors.emplace_back(depthTensor);
+        tensors.emplace_back(intrinsicsTensor);
+        tensors.emplace_back(xyzTensor);
+        algo = mgr->algorithm(tensors, shader);
+        algoInitialized = true;
+    }
+    
+    mgr->sequence()->record<kp::OpSyncDevice>(tensors)->record<kp::OpAlgoDispatch>(algo)->record<kp::OpSyncLocal>(tensors)->eval();
+    
+    xyzOut = xyzTensor->vector<float>();
+    
+    for(size_t i = 0; i < size; i++) {
+        points[i].x = xyzOut[i * 3 + 0];
+        points[i].y = xyzOut[i * 3 + 1];
+        points[i].z = xyzOut[i * 3 + 2];
+    }
+#else
+    (void)depthData;
+    (void)points;
+    throw std::runtime_error("Kompute not enabled in this build");
+#endif
+}
+
+// PointCloud main class implementations
+PointCloud::PointCloud() 
+    : pimplPointCloud() {
+}
+
 PointCloud::~PointCloud() = default;
 
-// Required virtual function overrides
 PointCloud::Properties& PointCloud::getProperties() {
     properties.initialConfig = *initialConfig;
     return properties;
@@ -506,3 +455,6 @@ void PointCloud::run() {
 
 }  // namespace node
 }  // namespace dai
+
+// Explicit template instantiation for Pimpl
+template class dai::Pimpl<dai::node::PointCloud::Impl>;

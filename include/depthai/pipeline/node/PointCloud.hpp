@@ -12,6 +12,14 @@
 #include "depthai/common/CameraBoardSocket.hpp"
 #include "depthai/common/HousingCoordinateSystem.hpp"
 #include "depthai/common/DepthUnit.hpp"
+#include "depthai/common/Point3f.hpp"
+
+#include <spdlog/spdlog.h>
+#include <spdlog/logger.h>
+
+#ifdef DEPTHAI_ENABLE_KOMPUTE
+    #include "kompute/Kompute.hpp"
+#endif
 
 namespace dai {
 namespace node {
@@ -22,6 +30,71 @@ namespace node {
 class PointCloud : public DeviceNodeCRTP<DeviceNode, PointCloud, PointCloudProperties>, public HostRunnable {
    public:
     constexpr static const char* NAME = "PointCloud";
+
+    class Impl {
+       public:
+        Impl() = default;
+        
+        void setLogger(std::shared_ptr<spdlog::logger> log);
+        
+        // Compute DENSE point cloud (width * height points, includes invalid z=0 or negative)
+        void computePointCloudDense(const uint8_t* depthData, std::vector<Point3f>& points);
+        
+        // Apply extrinsic transformation to points
+        void applyTransformation(std::vector<Point3f>& points);
+        
+        // Filter dense points to sparse (only z > 0)
+        std::vector<Point3f> filterValidPoints(const std::vector<Point3f>& densePoints);
+        
+        void setDepthUnit(dai::DepthUnit depthUnit);
+        void useCPU();
+        void useCPUMT(uint32_t numThreads);
+        void useGPU(uint32_t device);
+        void setIntrinsics(float fx, float fy, float cx, float cy, unsigned int width, unsigned int height);
+        void setExtrinsics(const std::vector<std::vector<float>>& transformMatrix);
+
+       private:
+        void initializeGPU(uint32_t device);
+        void transformPointsCPU(std::vector<Point3f>& points);
+        void calcPointsChunkDense(const uint8_t* depthData, std::vector<Point3f>& points, unsigned int startRow, unsigned int endRow);
+        void computePointCloudDenseCPU(const uint8_t* depthData, std::vector<Point3f>& points);
+        void computePointCloudDenseCPUMT(const uint8_t* depthData, std::vector<Point3f>& points);
+        void computePointCloudDenseGPU(const uint8_t* depthData, std::vector<Point3f>& points);
+        
+        enum class ComputeMethod { CPU, CPU_MT, GPU };
+        ComputeMethod computeMethod = ComputeMethod::CPU;
+        
+#ifdef DEPTHAI_ENABLE_KOMPUTE
+        std::shared_ptr<kp::Manager> mgr;
+        std::vector<uint32_t> shader;
+        std::shared_ptr<kp::Algorithm> algo;
+        std::shared_ptr<kp::Tensor> depthTensor;
+        std::shared_ptr<kp::Tensor> intrinsicsTensor;
+        std::shared_ptr<kp::Tensor> xyzTensor;
+        std::vector<std::shared_ptr<kp::Memory>> tensors;
+        bool algoInitialized = false;
+        bool tensorsInitialized = false;
+#endif
+        
+        static constexpr float DEFAULT_DEPTH_UNIT_MULTIPLIER = getLengthUnitMultiplier(DepthUnit::MILLIMETER);
+        static constexpr float MM_MULTIPLIER = getLengthUnitMultiplier(DepthUnit::MILLIMETER);
+        static constexpr float CM_MULTIPLIER = getLengthUnitMultiplier(DepthUnit::CENTIMETER);
+        
+        float scaleFactor = DEFAULT_DEPTH_UNIT_MULTIPLIER / MM_MULTIPLIER;
+        float translationScaleFactor = DEFAULT_DEPTH_UNIT_MULTIPLIER / CM_MULTIPLIER;
+        float depthUnitMultiplier = DEFAULT_DEPTH_UNIT_MULTIPLIER;
+        
+        float fx, fy, cx, cy;
+        unsigned int width, height;
+        size_t size;
+        bool intrinsicsSet = false;
+        uint32_t threadNum = 2;
+        
+        std::vector<std::vector<float>> extrinsics;
+        bool hasExtrinsics = false;
+        
+        std::shared_ptr<spdlog::logger> logger;
+    };
 
    protected:
     Properties& getProperties() override;
@@ -117,15 +190,14 @@ class PointCloud : public DeviceNodeCRTP<DeviceNode, PointCloud, PointCloudPrope
     bool runOnHost() const override;
 
    private:
-    class Impl;
-    Pimpl<Impl> pimplPointCloud;  // Our custom Impl for point cloud computation
+    Pimpl<Impl> pimplPointCloud;
     
     void run() override;
     void initialize(std::shared_ptr<ImgFrame> depthFrame);
     
     bool runOnHostVar = true;
     bool initialized = false;
-    bool keepOrganized = false;  // Add this line
+    bool keepOrganized = false;
     
     // Coordinate system transformation settings
     enum class CoordinateSystemType {
