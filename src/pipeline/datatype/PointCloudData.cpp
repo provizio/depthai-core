@@ -26,8 +26,10 @@ std::vector<Point3f> PointCloudData::getPoints() {
     }
     span<const Point3f> pointData(reinterpret_cast<Point3f*>(data->getData().data()), data->getData().size() / sizeof(Point3f));
     std::vector<Point3f> points(pointData.begin(), pointData.end());
-    assert(isSparse() || points.size() == width * height);
-    assert(!isSparse() || points.size() <= width * height);
+    // Organized: points.size() == width * height
+    // Sparse: points.size() <= width (height == 1)
+    assert(isOrganized() || points.size() <= width);
+    assert(!isOrganized() || points.size() == width * height);
 
     return points;
 }
@@ -38,8 +40,10 @@ std::vector<Point3fRGBA> PointCloudData::getPointsRGB() {
     }
     span<const Point3fRGBA> pointData(reinterpret_cast<Point3fRGBA*>(data->getData().data()), data->getData().size() / sizeof(Point3fRGBA));
     std::vector<Point3fRGBA> points(pointData.begin(), pointData.end());
-    assert(isSparse() || points.size() == width * height);
-    assert(!isSparse() || points.size() <= width * height);
+    // Organized: points.size() == width * height
+    // Sparse: points.size() <= width (height == 1)
+    assert(isOrganized() || points.size() <= width);
+    assert(!isOrganized() || points.size() == width * height);
 
     return points;
 }
@@ -88,7 +92,11 @@ float PointCloudData::getMaxZ() const {
     return maxz;
 }
 bool PointCloudData::isSparse() const {
-    return sparse;
+    return !isOrganized();
+}
+
+bool PointCloudData::isOrganized() const {
+    return height > 1;
 }
 
 bool PointCloudData::isColor() const {
@@ -142,6 +150,7 @@ PointCloudData& PointCloudData::setMaxZ(float val) {
     return *this;
 }
 PointCloudData& PointCloudData::setSparse(bool val) {
+    // Deprecated - width/height now determine organization
     sparse = val;
     return *this;
 }

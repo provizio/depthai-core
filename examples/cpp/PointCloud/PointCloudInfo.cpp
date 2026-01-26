@@ -16,7 +16,7 @@ int main() {
     auto device = std::make_shared<dai::Device>();
     
     cout << "Connected to device: " << device->getDeviceName() << endl;
-    cout << "MxId: " << device->getMxId() << "\n" << endl;
+    cout << "DeviceId: " << device->getDeviceId() << "\n" << endl;
     
     // Create pipeline
     dai::Pipeline pipeline(device);

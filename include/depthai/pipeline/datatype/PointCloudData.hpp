@@ -20,12 +20,19 @@ namespace dai {
  * PointCloudData message. Carries point cloud data.
  */
 class PointCloudData : public Buffer, public ProtoSerializable {
-    unsigned int width;        // width in pixels
-    unsigned int height;       // height in pixels
-    uint32_t instanceNum = 0;  // Which source created this frame (color, mono, ...)
+    unsigned int width;        // width in pixels (for organized) or number of points (for unorganized)
+    unsigned int height;       // height in pixels (for organized) or 1 (for unorganized)
+    uint32_t instanceNum = 0;  // Which source created this frame
     float minx, miny, minz;
     float maxx, maxy, maxz;
+    
+    // Keep for backward compatibility with protobuf serialization, but don't initialize here
+    // to avoid deprecation warnings. It will be set during deserialization if needed.
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     bool sparse = false;
+    #pragma GCC diagnostic pop
+    
     bool color = false;
 
    public:
@@ -91,8 +98,17 @@ class PointCloudData : public Buffer, public ProtoSerializable {
 
     /**
      * Retrieves whether point cloud is sparse
+     * @deprecated Use isOrganized() instead. Sparse means height == 1
      */
+    [[deprecated("isSparse is deprecated, use isOrganized() instead (isSparse == !isOrganized())")]]
     bool isSparse() const;
+
+    /**
+     * Retrieves whether point cloud is organized (height > 1)
+     * Organized point clouds have width x height structure from the original image
+     * Sparse point clouds have height == 1 and only contain valid points
+     */
+    bool isOrganized() const;
 
     /**
      * Retrieves whether point cloud is color
@@ -174,7 +190,9 @@ class PointCloudData : public Buffer, public ProtoSerializable {
      * Specifies whether point cloud is sparse
      *
      * @param val whether point cloud is sparse
+     * @deprecated This setter is deprecated and will be removed in a future release
      */
+    [[deprecated("setSparse is deprecated, width and height are set automatically based on organization")]]
     PointCloudData& setSparse(bool val);
 
     /**
@@ -236,7 +254,7 @@ class PointCloudData : public Buffer, public ProtoSerializable {
         return DatatypeEnum::PointCloudData;
     }
     DEPTHAI_SERIALIZE(
-        PointCloudData, width, height, minx, miny, minz, maxx, maxy, maxz, sparse, instanceNum, Buffer::ts, Buffer::tsDevice, Buffer::sequenceNum);
+        PointCloudData, width, height, minx, miny, minz, maxx, maxy, maxz, instanceNum, Buffer::ts, Buffer::tsDevice, Buffer::sequenceNum);
 };
 
 }  // namespace dai

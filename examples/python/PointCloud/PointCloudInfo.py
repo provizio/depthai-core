@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, '/home/tomas/code/depthai-device-kb/external/depthai-core/build/bindings/python/')
 
 # Set logging level
-os.environ["DEPTHAI_LEVEL"] = "info"
+# os.environ["DEPTHAI_LEVEL"] = "info"
 os.environ["DEPTHAI_DEVICE_RVC4_FWP"] = "/home/tomas/code/depthai-device-kb/build_docker_arm64_rvc4/RelWithDebInfo/depthai-device-rvc4-fwp.tar.xz"
 
 import depthai as dai
@@ -38,12 +38,15 @@ def main():
     left.build(dai.CameraBoardSocket.CAM_B)
     right.build(dai.CameraBoardSocket.CAM_C)
     
-    stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.DEFAULT)
+    # stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.DEFAULT)
     stereo.setSubpixel(True)
     
     pointCloud.setRunOnHost(True)
     pointCloud.setDepthUnit(dai.DepthUnit.MILLIMETER)
     pointCloud.useCPU()
+    
+    # Keep organized point cloud (width * height points)
+    pointCloud.keepPointCloudOrganized()
     
     # Transform point cloud to target coordinate system
     pointCloud.setTargetCoordinateSystem(dai.HousingCoordinateSystem.VESA_A)
@@ -54,6 +57,7 @@ def main():
     leftOut.link(stereo.left)
     rightOut.link(stereo.right)
     stereo.depth.link(pointCloud.inputDepth)
+    stereo_queue = stereo.depth.createOutputQueue()
     
     queue = pointCloud.outputPointCloud.createOutputQueue()
     pipeline.start()
@@ -67,6 +71,8 @@ def main():
             pclData = queue.get()
             if not pclData:
                 continue
+            depth_frame = stereo_queue.get().getCvFrame()
+            print(f"Depth frame shape: {depth_frame.shape}")
             
             points = pclData.getPoints()
             
@@ -74,6 +80,10 @@ def main():
             print(f"Frame {frameCount}")
             print("========================================")
             print(f"Total points: {len(points)}")
+            print(f"PointCloud organized: {pclData.isOrganized()}")
+            print(f"PointCloud color: {pclData.isColor()}")
+            print(f"PointCloud width: {pclData.getWidth()}")
+            print(f"PointCloud height: {pclData.getHeight()}")
             
             print("\nBounding box (mm):")
             print(f"  X: [{pclData.getMinX()}, {pclData.getMaxX()}]")

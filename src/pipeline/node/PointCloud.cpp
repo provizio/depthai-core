@@ -6,7 +6,6 @@
 
 #include "depthai/pipeline/datatype/ImgFrame.hpp"
 #include "depthai/pipeline/datatype/PointCloudData.hpp"
-#include "depthai/pipeline/datatype/PointCloudArrayData.hpp"
 #include "depthai/common/DepthUnit.hpp"
 #include "common/Point3f.hpp"
 #include "pipeline/ThreadedNodeImpl.hpp"
@@ -345,6 +344,10 @@ void PointCloud::setTargetCoordinateSystem(HousingCoordinateSystem housingCS, bo
     this->useSpecTranslation = useSpecTranslation;
 }
 
+void PointCloud::keepPointCloudOrganized() {
+    keepOrganized = true;
+}
+
 void PointCloud::initialize(std::shared_ptr<ImgFrame> depthFrame) {
     pimpl->logger->debug("PointCloud::initialize() called");
     pimplPointCloud->setLogger(pimpl->logger);
@@ -424,32 +427,43 @@ void PointCloud::run() {
             const auto* depthData = depthFrame->getData().data();
             pimplPointCloud->computePointCloudDense(depthData, densePoints);
             
-            // Step 2: Filter to valid points
-            std::vector<Point3f> sparsePoints = pimplPointCloud->filterValidPoints(densePoints);
-            
-            // Step 3: Apply coordinate system transformation if needed
+            // Step 2: Apply coordinate system transformation if needed
             pimplPointCloud->applyTransformation(densePoints);
             
-            // Calculate bounding box from sparse points
+            // Step 3: Determine output points based on keepOrganized flag
+            std::vector<Point3f> outputPoints;
+            if(keepOrganized) {
+                // Keep all points (dense/organized)
+                outputPoints = densePoints;
+            } else {
+                // Filter to valid points only (sparse)
+                outputPoints = pimplPointCloud->filterValidPoints(densePoints);
+            }
+            
+            // Calculate bounding box from output points (skip z=0 points even in organized mode)
             float minX = 0.0f, minY = 0.0f, minZ = 0.0f;
             float maxX = 0.0f, maxY = 0.0f, maxZ = 0.0f;
             
-            if(!sparsePoints.empty()) {
-                minX = maxX = sparsePoints[0].x;
-                minY = maxY = sparsePoints[0].y;
-                minZ = maxZ = sparsePoints[0].z;
-                
-                for(const auto& p : sparsePoints) {
-                    minX = std::min(minX, p.x);
-                    minY = std::min(minY, p.y);
-                    minZ = std::min(minZ, p.z);
-                    maxX = std::max(maxX, p.x);
-                    maxY = std::max(maxY, p.y);
-                    maxZ = std::max(maxZ, p.z);
+            bool foundValidPoint = false;
+            for(const auto& p : outputPoints) {
+                if(p.z > 0.0f) {
+                    if(!foundValidPoint) {
+                        minX = maxX = p.x;
+                        minY = maxY = p.y;
+                        minZ = maxZ = p.z;
+                        foundValidPoint = true;
+                    } else {
+                        minX = std::min(minX, p.x);
+                        minY = std::min(minY, p.y);
+                        minZ = std::min(minZ, p.z);
+                        maxX = std::max(maxX, p.x);
+                        maxY = std::max(maxY, p.y);
+                        maxZ = std::max(maxZ, p.z);
+                    }
                 }
             }
             
-            // Step 4: Create sparse PointCloudData for final output
+            // Step 4: Create PointCloudData for final output
             auto pc = std::make_shared<PointCloudData>();
             pc->setTimestamp(depthFrame->getTimestamp());
             pc->setTimestampDevice(depthFrame->getTimestampDevice());
@@ -461,7 +475,18 @@ void PointCloud::run() {
             pc->setMaxX(maxX);
             pc->setMaxY(maxY);
             pc->setMaxZ(maxZ);
-            pc->setPoints(sparsePoints);
+            pc->setPoints(outputPoints);
+            
+            // Set width and height based on organization
+            if(keepOrganized) {
+                // Organized point cloud: width x height
+                pc->setWidth(width);
+                pc->setHeight(height);
+            } else {
+                // Sparse point cloud: width = num_points, height = 1
+                pc->setWidth(static_cast<unsigned int>(outputPoints.size()));
+                pc->setHeight(1);
+            }
             
             {
                 auto blockEvent = this->outputBlockEvent();

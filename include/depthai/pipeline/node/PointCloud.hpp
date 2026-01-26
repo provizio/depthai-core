@@ -108,6 +108,12 @@ class PointCloud : public DeviceNodeCRTP<DeviceNode, PointCloud, PointCloudPrope
      */
     void setTargetCoordinateSystem(HousingCoordinateSystem housingCS, bool useSpecTranslation = false);
 
+    /**
+     * Keep point cloud organized (width * height points)
+     * Invalid points will have z=0 but will be kept in the output
+     */
+    void keepPointCloudOrganized();
+
     bool runOnHost() const override;
 
    private:
@@ -119,6 +125,7 @@ class PointCloud : public DeviceNodeCRTP<DeviceNode, PointCloud, PointCloudPrope
     
     bool runOnHostVar = true;
     bool initialized = false;
+    bool keepOrganized = false;  // Add this line
     
     // Coordinate system transformation settings
     enum class CoordinateSystemType {
