@@ -28,6 +28,9 @@ void DynamicCalibrationWorker::buildInternalQueues() {
     // TODO check left right inputs
     dynamicCalibrationCalibrationQueue = dynamicCalibration->calibrationOutput.createOutputQueue();
     dynamicCalibrationCommandQueue = dynamicCalibration->inputControl.createInputQueue();
+    gateControlQueue = gate->inputControl.createInputQueue();
+    sync->out.link(gate->input);
+    gate->output.link(dynamicCalibration->syncInput);
 }
 
 void DynamicCalibrationWorker::buildInternal() {
@@ -60,6 +63,7 @@ bool DynamicCalibrationWorker::checkCalibration() {
 
 void DynamicCalibrationWorker::updateCalibration() {
     bool succesfullyRecalibrated = false;
+    gateControlQueue->send(dai::GateControl::openGate());
     while(!succesfullyRecalibrated) {
         dynamicCalibrationCommandQueue->send(DCC::startCalibration());
 
@@ -78,6 +82,7 @@ void DynamicCalibrationWorker::updateCalibration() {
         }
         dynamicCalibrationCommandQueue->send(DCC::resetData());
     }
+    gateControlQueue->send(dai::GateControl::closeGate());
 }
 
 void DynamicCalibrationWorker::runContinuousMode() {

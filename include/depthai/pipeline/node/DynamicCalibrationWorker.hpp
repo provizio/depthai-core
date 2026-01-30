@@ -5,6 +5,7 @@
 #include <depthai/pipeline/datatype/DynamicCalibrationControl.hpp>
 #include <depthai/pipeline/datatype/DynamicCalibrationResults.hpp>
 #include <depthai/pipeline/node/DynamicCalibrationNode.hpp>
+#include <depthai/pipeline/node/Gate.hpp>
 #include <depthai/properties/DynamicCalibrationWorkerProperties.hpp>
 
 namespace spdlog {
@@ -16,6 +17,15 @@ namespace node {
 class DynamicCalibrationWorker : public DeviceNodeCRTP<DeviceNode, DynamicCalibrationWorker, DynamicCalibrationWorkerProperties>, public HostRunnable {
    private:
     Subnode<node::DynamicCalibration> dynamicCalibration{*this, "dynamicCalibration"};
+
+    Subnode<node::Sync> sync{*this, "sync"};
+
+    Subnode<node::Gate> gate{*this, "gate"};
+
+    InputMap& inputs = sync->inputs;
+
+    std::string leftInputName = "left";
+    std::string rightInputName = "right";
 
    public:
     using DCC = dai::DynamicCalibrationControl;
@@ -57,6 +67,7 @@ class DynamicCalibrationWorker : public DeviceNodeCRTP<DeviceNode, DynamicCalibr
 
     DynamicCalibrationWorkerProperties properties;
 
+    std::shared_ptr<dai::InputQueue> gateControlQueue;
     std::shared_ptr<dai::InputQueue> dynamicCalibrationCommandQueue;
     std::shared_ptr<dai::MessageQueue> dynamicCalibrationCalibrationQueue;
 
