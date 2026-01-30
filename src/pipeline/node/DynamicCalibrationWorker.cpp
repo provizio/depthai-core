@@ -17,6 +17,16 @@ void DynamicCalibrationWorker::setRunOnHost(bool runOnHost) {
     runOnHostVar = runOnHost;
 }
 
+std::shared_ptr<DynamicCalibrationWorker> DynamicCalibrationWorker::build(const std::shared_ptr<Camera> cameraLeft, const std::shared_ptr<Camera> cameraRight) {
+    sync->setRunOnHost(false);
+    gate->setRunOnHost(false);
+    auto outputCameraLeft = cameraLeft->requestOutput({1280, 800});
+    auto outputCameraRight = cameraRight->requestOutput({1280, 800});
+    outputCameraLeft->link(left);
+    outputCameraRight->link(right);
+    return std::static_pointer_cast<DynamicCalibrationWorker>(shared_from_this());
+}
+
 /**
  * Check if the node is set to run on host
  */

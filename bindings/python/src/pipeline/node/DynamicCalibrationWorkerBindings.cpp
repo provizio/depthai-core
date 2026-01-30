@@ -26,6 +26,6 @@ void bind_dynamic_calibration_worker(pybind11::module& m, void* pCallstack) {
 
     // Actual bindings
     ///////////////////////////////////////////////////////////////////////
-    dynamicCalibrationWorker.def_property_readonly(
-        "syncedInput", [](DynamicCalibrationWorker& node) { return &node.syncedInput; }, py::return_value_policy::reference_internal);
+    dynamicCalibrationWorker.def(
+        "build", &DynamicCalibrationWorker::build, py::arg("cameraLeft"), py::arg("cameraRight"), DOC(dai, node, DynamicCalibrationWorker, build));
 }

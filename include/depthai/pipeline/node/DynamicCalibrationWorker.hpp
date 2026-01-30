@@ -4,6 +4,7 @@
 #include <depthai/pipeline/Subnode.hpp>
 #include <depthai/pipeline/datatype/DynamicCalibrationControl.hpp>
 #include <depthai/pipeline/datatype/DynamicCalibrationResults.hpp>
+#include <depthai/pipeline/node/Camera.hpp>
 #include <depthai/pipeline/node/DynamicCalibrationNode.hpp>
 #include <depthai/pipeline/node/Gate.hpp>
 #include <depthai/properties/DynamicCalibrationWorkerProperties.hpp>
@@ -30,16 +31,14 @@ class DynamicCalibrationWorker : public DeviceNodeCRTP<DeviceNode, DynamicCalibr
    public:
     using DCC = dai::DynamicCalibrationControl;
 
+    std::shared_ptr<DynamicCalibrationWorker> build(const std::shared_ptr<Camera> cameraLeft, const std::shared_ptr<Camera> cameraRight);
+
     constexpr static const char* NAME = "DynamicCalibrationWorker";
     using DeviceNodeCRTP::DeviceNodeCRTP;
 
     ~DynamicCalibrationWorker() override;
 
     std::shared_ptr<DynamicCalibrationWorkerConfig> initialConfig = std::make_shared<DynamicCalibrationWorkerConfig>();
-
-#ifndef DEPTHAI_INTERNAL_DEVICE_BUILD_RVC4
-    Input& syncedInput = dynamicCalibration->syncInput;
-#endif
 
     void run() override;
 
@@ -53,6 +52,20 @@ class DynamicCalibrationWorker : public DeviceNodeCRTP<DeviceNode, DynamicCalibr
     Properties& getProperties() override;
 
    private:
+#ifndef DEPTHAI_INTERNAL_DEVICE_BUILD_RVC4
+    /**
+     * Input left image
+     */
+    Input& left = inputs[leftInputName];
+
+    /**
+     * Input right image
+     */
+    Input& right = inputs[rightInputName];
+
+    InputMap& syncedInput = sync->inputs;
+#endif
+
     void buildInternalQueues() override;
 
     bool checkCalibration();
