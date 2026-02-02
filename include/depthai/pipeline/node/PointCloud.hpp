@@ -46,12 +46,14 @@ class PointCloud : public DeviceNodeCRTP<DeviceNode, PointCloud, PointCloudPrope
         // Filter dense points to sparse (only z > 0)
         std::vector<Point3f> filterValidPoints(const std::vector<Point3f>& densePoints);
         
-        void setDepthUnit(dai::DepthUnit depthUnit);
+        void setLengthUnit(dai::LengthUnit lengthUnit);
         void useCPU();
         void useCPUMT(uint32_t numThreads);
         void useGPU(uint32_t device);
         void setIntrinsics(float fx, float fy, float cx, float cy, unsigned int width, unsigned int height);
         void setExtrinsics(const std::vector<std::vector<float>>& transformMatrix);
+
+        LengthUnit targetLengthUnit = LengthUnit::MILLIMETER; 
 
        private:
         void initializeGPU(uint32_t device);
@@ -76,13 +78,11 @@ class PointCloud : public DeviceNodeCRTP<DeviceNode, PointCloud, PointCloudPrope
         bool tensorsInitialized = false;
 #endif
         
-        static constexpr float DEFAULT_DEPTH_UNIT_MULTIPLIER = getLengthUnitMultiplier(DepthUnit::MILLIMETER);
-        static constexpr float MM_MULTIPLIER = getLengthUnitMultiplier(DepthUnit::MILLIMETER);
-        static constexpr float CM_MULTIPLIER = getLengthUnitMultiplier(DepthUnit::CENTIMETER);
+        static constexpr float DEFAULT_LENGTH_UNIT_MULTIPLIER = getLengthUnitMultiplier(LengthUnit::MILLIMETER);
+        static constexpr float MM_MULTIPLIER = getLengthUnitMultiplier(LengthUnit::MILLIMETER);
         
-        float scaleFactor = DEFAULT_DEPTH_UNIT_MULTIPLIER / MM_MULTIPLIER;
-        float translationScaleFactor = DEFAULT_DEPTH_UNIT_MULTIPLIER / CM_MULTIPLIER;
-        float depthUnitMultiplier = DEFAULT_DEPTH_UNIT_MULTIPLIER;
+        float scaleFactor = DEFAULT_LENGTH_UNIT_MULTIPLIER / MM_MULTIPLIER;  // = 1.0 (mm to mm by default)
+        float lengthUnitMultiplier = DEFAULT_LENGTH_UNIT_MULTIPLIER;
         
         float fx, fy, cx, cy;
         unsigned int width, height;
@@ -145,10 +145,10 @@ class PointCloud : public DeviceNodeCRTP<DeviceNode, PointCloud, PointCloudPrope
     void setRunOnHost(bool runOnHost);
 
     /**
-     * Set depth unit for point cloud computation
-     * @param depthUnit Depth unit (METER, CENTIMETER, MILLIMETER, INCH, FOOT, CUSTOM)
+     * Set length unit for point cloud computation
+     * @param lengthUnit Length unit (METER, CENTIMETER, MILLIMETER, INCH, FOOT, CUSTOM)
      */
-    void setDepthUnit(DepthUnit depthUnit);
+    void setLengthUnit(LengthUnit lengthUnit);
 
     /**
      * Use single-threaded CPU for processing
@@ -177,9 +177,9 @@ class PointCloud : public DeviceNodeCRTP<DeviceNode, PointCloud, PointCloudPrope
      * Set target coordinate system to housing coordinate system
      * Point cloud will be transformed to this housing coordinate system
      * @param housingCS Target housing coordinate system
-     * @param useSpecTranslation Whether to use spec translation (default: false)
+     * @param useSpecTranslation Whether to use spec translation (default: true)
      */
-    void setTargetCoordinateSystem(HousingCoordinateSystem housingCS, bool useSpecTranslation = false);
+    void setTargetCoordinateSystem(HousingCoordinateSystem housingCS, bool useSpecTranslation = true);
 
     /**
      * Keep point cloud organized (width * height points)
@@ -209,7 +209,7 @@ class PointCloud : public DeviceNodeCRTP<DeviceNode, PointCloud, PointCloudPrope
     CoordinateSystemType coordSystemType = CoordinateSystemType::NONE;
     CameraBoardSocket targetCameraSocket = CameraBoardSocket::AUTO;
     HousingCoordinateSystem targetHousingCS = HousingCoordinateSystem::AUTO;
-    bool useSpecTranslation = false;
+    bool useSpecTranslation = true;
 };
 
 }  // namespace node

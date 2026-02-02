@@ -45,7 +45,14 @@ void PointCloud::Impl::computePointCloudDense(const uint8_t* depthData, std::vec
 
 void PointCloud::Impl::applyTransformation(std::vector<Point3f>& points) {
     if(!hasExtrinsics) {
+        if(logger) {
+            logger->debug("No extrinsics set, skipping transformation");
+        }
         return;
+    }
+    
+    if(logger) {
+        logger->info("Applying coordinate system transformation");
     }
     
     switch(computeMethod) {
@@ -74,18 +81,21 @@ std::vector<Point3f> PointCloud::Impl::filterValidPoints(const std::vector<Point
     return sparsePoints;
 }
 
-void PointCloud::Impl::setDepthUnit(dai::DepthUnit depthUnit) {
-    depthUnitMultiplier = getLengthUnitMultiplier(depthUnit);
+void PointCloud::Impl::setLengthUnit(dai::LengthUnit lengthUnit) {
+    // Check if unit actually changed
+    bool unitChanged = (targetLengthUnit != lengthUnit);
     
-    constexpr float MM_MULTIPLIER = getLengthUnitMultiplier(DepthUnit::MILLIMETER);
-    constexpr float CM_MULTIPLIER = getLengthUnitMultiplier(DepthUnit::CENTIMETER);
+    targetLengthUnit = lengthUnit;
+    lengthUnitMultiplier = getLengthUnitMultiplier(lengthUnit);
     
-    scaleFactor = depthUnitMultiplier / MM_MULTIPLIER;
-    translationScaleFactor = depthUnitMultiplier / CM_MULTIPLIER;
+    // Depth values from sensor are in millimeters (uint16_t raw values)
+    // scaleFactor converts from mm to target unit
+    constexpr float MM_MULTIPLIER = getLengthUnitMultiplier(LengthUnit::MILLIMETER);
+    scaleFactor = lengthUnitMultiplier / MM_MULTIPLIER;
     
     if(logger) {
-        logger->debug("Set depth unit: multiplier={}, scaleFactor={}, translationScaleFactor={}", 
-                    depthUnitMultiplier, scaleFactor, translationScaleFactor);
+        logger->info("Set length unit: multiplier={}, scaleFactor={} (mm->target), unit changed: {}", 
+                    lengthUnitMultiplier, scaleFactor, unitChanged);
     }
 }
 
@@ -119,6 +129,14 @@ void PointCloud::Impl::setExtrinsics(const std::vector<std::vector<float>>& tran
     }
     extrinsics = transformMatrix;
     hasExtrinsics = true;
+    
+    if(logger) {
+        logger->info("Extrinsics transformation matrix set:");
+        for(size_t i = 0; i < 4; i++) {
+            logger->info("  [{:8.4f}, {:8.4f}, {:8.4f}, {:8.4f}]", 
+                        extrinsics[i][0], extrinsics[i][1], extrinsics[i][2], extrinsics[i][3]);
+        }
+    }
 }
 
 void PointCloud::Impl::initializeGPU(uint32_t device) {
@@ -133,16 +151,30 @@ void PointCloud::Impl::initializeGPU(uint32_t device) {
 }
 
 void PointCloud::Impl::transformPointsCPU(std::vector<Point3f>& points) {
+    // Both points and extrinsics translations are in the same unit (target unit)
+    // No conversion needed - just apply the transformation directly
+    
+    if(logger) {
+        logger->debug("Applying transformation to {} points", points.size());
+    }
+    
+    size_t transformedCount = 0;
     for(auto& p : points) {
         if(p.z > 0.0f) {
-            float x = extrinsics[0][0] * p.x + extrinsics[0][1] * p.y + extrinsics[0][2] * p.z + extrinsics[0][3] * translationScaleFactor;
-            float y = extrinsics[1][0] * p.x + extrinsics[1][1] * p.y + extrinsics[1][2] * p.z + extrinsics[1][3] * translationScaleFactor;
-            float z = extrinsics[2][0] * p.x + extrinsics[2][1] * p.y + extrinsics[2][2] * p.z + extrinsics[2][3] * translationScaleFactor;
+            // Standard 4x4 transformation: R*p + t
+            float x = extrinsics[0][0] * p.x + extrinsics[0][1] * p.y + extrinsics[0][2] * p.z + extrinsics[0][3];
+            float y = extrinsics[1][0] * p.x + extrinsics[1][1] * p.y + extrinsics[1][2] * p.z + extrinsics[1][3];
+            float z = extrinsics[2][0] * p.x + extrinsics[2][1] * p.y + extrinsics[2][2] * p.z + extrinsics[2][3];
             
             p.x = x;
             p.y = y;
             p.z = z;
+            transformedCount++;
         }
+    }
+    
+    if(logger) {
+        logger->debug("Transformed {} valid points (z > 0)", transformedCount);
     }
 }
 
@@ -265,8 +297,16 @@ bool PointCloud::runOnHost() const {
     return runOnHostVar;
 }
 
-void PointCloud::setDepthUnit(dai::DepthUnit depthUnit) {
-    pimplPointCloud->setDepthUnit(depthUnit);
+void PointCloud::setLengthUnit(dai::LengthUnit lengthUnit) {
+    pimplPointCloud->setLengthUnit(lengthUnit);
+    
+    // If already initialized, we need to re-fetch extrinsics with the new unit
+    if(initialized) {
+        if(pimpl->logger) {
+            pimpl->logger->warn("Length unit changed after initialization - extrinsics will be re-fetched");
+        }
+        initialized = false;  // Force re-initialization on next frame
+    }
 }
 
 void PointCloud::useCPU() {
@@ -326,18 +366,29 @@ void PointCloud::initialize(std::shared_ptr<ImgFrame> depthFrame) {
     auto calibHandler = device->getCalibration();
     std::vector<std::vector<float>> transformMatrix;
     
+    // Use the same unit as the point cloud for extrinsics
+    // This way both points and translations are in the same unit
+    auto extrinsicsUnit = pimplPointCloud->targetLengthUnit;
+    
     switch(coordSystemType) {
         case CoordinateSystemType::CAMERA_SOCKET:
-            pimpl->logger->info("Using CAMERA_SOCKET transformation from {} to {}", 
-                                toString(srcCamera), toString(targetCameraSocket));
-            transformMatrix = calibHandler.getCameraExtrinsics(srcCamera, targetCameraSocket, useSpecTranslation);
+            pimpl->logger->info("Using CAMERA_SOCKET transformation from {} to {}, unit: {}", 
+                                toString(srcCamera), toString(targetCameraSocket), static_cast<int>(extrinsicsUnit));
+            transformMatrix = calibHandler.getCameraExtrinsics(srcCamera, targetCameraSocket, useSpecTranslation, extrinsicsUnit);
             pimplPointCloud->setExtrinsics(transformMatrix);
             break;
             
         case CoordinateSystemType::HOUSING:
-            pimpl->logger->info("Using HOUSING transformation from {} to housing {}", 
-                                toString(srcCamera), static_cast<int>(targetHousingCS));
-            transformMatrix = calibHandler.getHousingCalibration(srcCamera, targetHousingCS, useSpecTranslation);
+            pimpl->logger->info("Using HOUSING transformation from {} to housing {}, unit: {}", 
+                                toString(srcCamera), static_cast<int>(targetHousingCS), static_cast<int>(extrinsicsUnit));
+            transformMatrix = calibHandler.getHousingCalibration(srcCamera, targetHousingCS, useSpecTranslation, extrinsicsUnit);
+            
+            pimpl->logger->info("Retrieved housing transformation matrix:");
+            for(size_t i = 0; i < transformMatrix.size(); i++) {
+                pimpl->logger->info("  [{:8.4f}, {:8.4f}, {:8.4f}, {:8.4f}]", 
+                            transformMatrix[i][0], transformMatrix[i][1], transformMatrix[i][2], transformMatrix[i][3]);
+            }
+            
             pimplPointCloud->setExtrinsics(transformMatrix);
             break;
             
@@ -371,30 +422,29 @@ void PointCloud::run() {
             auto width = depthFrame->getWidth();
             auto height = depthFrame->getHeight();
             
-            // Step 1: Compute dense point cloud (width * height points, no transformation)
-            std::vector<Point3f> densePoints;
+            // Step 1: Compute dense point cloud directly into final storage
+            // Allocate once for the maximum size needed
+            std::vector<Point3f> points;
             const auto* depthData = depthFrame->getData().data();
-            pimplPointCloud->computePointCloudDense(depthData, densePoints);
             
-            // Step 2: Apply coordinate system transformation if needed
-            pimplPointCloud->applyTransformation(densePoints);
-            
-            // Step 3: Determine output points based on keepOrganized flag
-            std::vector<Point3f> outputPoints;
             if(keepOrganized) {
-                // Keep all points (dense/organized)
-                outputPoints = densePoints;
+                // For organized output, compute directly into final storage
+                pimplPointCloud->computePointCloudDense(depthData, points);
+                pimplPointCloud->applyTransformation(points);
             } else {
-                // Filter to valid points only (sparse)
-                outputPoints = pimplPointCloud->filterValidPoints(densePoints);
+                // For sparse output, we need to filter, so compute dense first
+                std::vector<Point3f> densePoints;
+                pimplPointCloud->computePointCloudDense(depthData, densePoints);
+                pimplPointCloud->applyTransformation(densePoints);
+                points = pimplPointCloud->filterValidPoints(densePoints);
             }
             
-            // Calculate bounding box from output points (skip z=0 points even in organized mode)
+            // Calculate bounding box (skip z=0 points)
             float minX = 0.0f, minY = 0.0f, minZ = 0.0f;
             float maxX = 0.0f, maxY = 0.0f, maxZ = 0.0f;
             
             bool foundValidPoint = false;
-            for(const auto& p : outputPoints) {
+            for(const auto& p : points) {
                 if(p.z > 0.0f) {
                     if(!foundValidPoint) {
                         minX = maxX = p.x;
@@ -412,7 +462,7 @@ void PointCloud::run() {
                 }
             }
             
-            // Step 4: Create PointCloudData for final output
+            // Create PointCloudData and move points
             auto pc = std::make_shared<PointCloudData>();
             pc->setTimestamp(depthFrame->getTimestamp());
             pc->setTimestampDevice(depthFrame->getTimestampDevice());
@@ -424,16 +474,16 @@ void PointCloud::run() {
             pc->setMaxX(maxX);
             pc->setMaxY(maxY);
             pc->setMaxZ(maxZ);
-            pc->setPoints(outputPoints);
+            
+            // Move points instead of copying
+            pc->setPoints(std::move(points));
             
             // Set width and height based on organization
             if(keepOrganized) {
-                // Organized point cloud: width x height
                 pc->setWidth(width);
                 pc->setHeight(height);
             } else {
-                // Sparse point cloud: width = num_points, height = 1
-                pc->setWidth(static_cast<unsigned int>(outputPoints.size()));
+                pc->setWidth(static_cast<unsigned int>(pc->getPoints().size()));
                 pc->setHeight(1);
             }
             

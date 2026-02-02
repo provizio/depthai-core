@@ -39,7 +39,7 @@ void bind_pointcloud(pybind11::module& m, void* pCallstack) {
         .def_readonly("initialConfig", &PointCloud::initialConfig, DOC(dai, node, PointCloud, initialConfig), DOC(dai, node, PointCloud, initialConfig))
         .def("setNumFramesPool", &PointCloud::setNumFramesPool, py::arg("numFramesPool"), DOC(dai, node, PointCloud, setNumFramesPool))
         .def("setRunOnHost", &PointCloud::setRunOnHost, py::arg("runOnHost"), DOC(dai, node, PointCloud, setRunOnHost))
-        .def("setDepthUnit", &PointCloud::setDepthUnit, py::arg("depthUnit"), DOC(dai, node, PointCloud, setDepthUnit))
+        .def("setLengthUnit", &PointCloud::setLengthUnit, py::arg("lengthUnit"), DOC(dai, node, PointCloud, setLengthUnit))
         .def("useCPU", &PointCloud::useCPU, DOC(dai, node, PointCloud, useCPU))
         .def("useCPUMT", &PointCloud::useCPUMT, py::arg("numThreads") = 2, DOC(dai, node, PointCloud, useCPUMT))
         .def("useGPU", &PointCloud::useGPU, py::arg("device") = 0, DOC(dai, node, PointCloud, useGPU))

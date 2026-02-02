@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, '/home/tomas/code/depthai-device-kb/external/depthai-core/build/bindings/python/')
 
 # Set logging level
-# os.environ["DEPTHAI_LEVEL"] = "info"
+os.environ["DEPTHAI_LEVEL"] = "info"
 os.environ["DEPTHAI_DEVICE_RVC4_FWP"] = "/home/tomas/code/depthai-device-kb/build_docker_arm64_rvc4/RelWithDebInfo/depthai-device-rvc4-fwp.tar.xz"
 
 import depthai as dai
@@ -42,7 +42,7 @@ def main():
     stereo.setSubpixel(True)
     
     pointCloud.setRunOnHost(True)
-    pointCloud.setDepthUnit(dai.DepthUnit.MILLIMETER)
+    pointCloud.setLengthUnit(dai.LengthUnit.METER)
     pointCloud.useCPU()
     
     # Keep organized point cloud (width * height points)

@@ -33,7 +33,7 @@ int main() {
     stereo->setSubpixel(true);
     
     pointCloud->setRunOnHost(true);
-    pointCloud->setDepthUnit(dai::DepthUnit::MILLIMETER);
+    pointCloud->setLengthUnit(dai::LengthUnit::MILLIMETER);
     pointCloud->useCPU();
     
     // Transform point cloud to target coordinate system
