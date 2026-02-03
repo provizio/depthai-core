@@ -273,6 +273,16 @@ void DynamicCalibration::setCalibration(CalibrationHandler& handler) {
     pimplDCL->sensorB->setCalibration(calibB);
 }
 
+void DynamicCalibration::computeMetrics(const CalibrationHandler& handler) {
+    auto [calibA, calibB] = DclUtils::convertDaiCalibrationToDcl(handler, daiSocketA, daiSocketB, resolutionA, resolutionB);
+    auto reprojectionError = pimplDCL->dynCalibImpl.computeReprojectionError(calibA, calibB, pimplDCL->sensorA, pimplDCL->sensorB);
+    auto confidence = pimplDCL->dynCalibImpl.computeCalibrationConfidence(calibA, calibB, pimplDCL->sensorA, pimplDCL->sensorB);
+    auto metrics = std::make_shared<CalibrationMetrics>();
+    metrics->reprojectionError = reprojectionError.value;
+    metrics->calibrationConfidence = confidence.value;
+    metricsOutput.send(metrics);
+}
+
 DynamicCalibration::ErrorCode DynamicCalibration::runQualityCheck(const bool force) {
     dcl::PerformanceMode pm = force ? dcl::PerformanceMode::SKIP_CHECKS : DclUtils::daiPerformanceModeToDclPerformanceMode(performanceMode);
     logger->info("Running calibration quality check (force={} mode={})", force, static_cast<int>(pm));
@@ -517,6 +527,11 @@ DynamicCalibration::ErrorCode DynamicCalibration::evaluateCommand(const std::sha
         const auto& c = std::get<DC::Commands::SetPerformanceMode>(cmd);
         logger->info("Received SetPerformanceModeCommand: changing performance mode to {}", static_cast<int>(c.performanceMode));
         performanceMode = c.performanceMode;
+        return ErrorCode::OK;
+    } else if(std::holds_alternative<DC::Commands::ComputeCalibrationMetrics>(cmd)) {
+        logger->info("Received ComputerCalibrationMetrics: calculation metricis");
+        const auto& c = std::get<DC::Commands::ComputeCalibrationMetrics>(cmd);
+        computeMetrics(c.calibration);
         return ErrorCode::OK;
     }
 
