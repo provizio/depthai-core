@@ -21,6 +21,8 @@ class Gate : public DeviceNodeCRTP<DeviceNode, Gate, GateProperties> {
     Properties& getProperties() override;
 
    public:
+    Gate() = default;
+
     Gate(std::unique_ptr<Properties> props);
 
     std::shared_ptr<GateControl> initialConfig = std::make_shared<GateControl>();
