@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "depthai/device/CalibrationHandler.hpp"
+#include "depthai/pipeline/node/DynamicCalibrationWorker.hpp"
 #include "depthai/pipeline/node/internal/XLinkIn.hpp"
 #include "depthai/pipeline/node/internal/XLinkInHost.hpp"
 #include "depthai/pipeline/node/internal/XLinkOut.hpp"
@@ -620,8 +621,41 @@ bool PipelineImpl::isBuilt() const {
     return isBuild;
 }
 
-void PipelineImpl::build() {
+std::pair<std::shared_ptr<dai::node::Camera>, std::shared_ptr<dai::node::Camera>> PipelineImpl::getStereoPair() const {
+    std::pair<std::shared_ptr<dai::node::Camera>, std::shared_ptr<dai::node::Camera>> stereoPair = std::pair(nullptr, nullptr);
+    for(const auto& node : getAllNodes()) {
+        if(node->getName() == dai::node::Camera::NAME) {
+            auto camera = std::static_pointer_cast<dai::node::Camera>(node);
+            auto board_socket = camera->getBoardSocket();
+            if(board_socket == dai::CameraBoardSocket::CAM_B) {
+                stereoPair.first = camera;
+            } else if(board_socket == dai::CameraBoardSocket::CAM_C) {
+                stereoPair.second = camera;
+            }
+        }
+    }
+    return stereoPair;
+}
+
+void PipelineImpl::build(bool buildInternalQueue) {
     std::unique_lock<std::mutex> lock(pipelineBuildMutex);
+    if(!isBuild) {
+#ifndef DEPTHAI_INTERNAL_DEVICE_BUILD_RVC4
+        auto stereoPair = getStereoPair();
+        if(stereoPair.first && stereoPair.second) {
+            Logging::getInstance().logger.info("DynamicCalibrationWorker is initialized");
+            create<dai::node::DynamicCalibrationWorker>(shared_from_this())->build(stereoPair.first, stereoPair.second);
+        }
+#endif
+    }
+    if(buildInternalQueue) {
+        // Starts pipeline, go through all nodes and start them
+        for(const auto& node : getAllNodes()) {
+            if(node->runOnHost()) {
+                node->buildInternalQueues();
+            }
+        }
+    }
 
     if(isBuild) return;
 
@@ -800,15 +834,8 @@ void PipelineImpl::start() {
     //     }
     // }
 
-    // Starts pipeline, go through all nodes and start them
-    for(const auto& node : getAllNodes()) {
-        if(node->runOnHost()) {
-            node->buildInternalQueues();
-        }
-    }
-
     // Implicitly build (if not already)
-    build();
+    build(true);
 
     Logging::getInstance().logger.debug("Full schema dump: {}", ((nlohmann::json)getPipelineSchema(SerializationType::JSON, false)).dump());
 
