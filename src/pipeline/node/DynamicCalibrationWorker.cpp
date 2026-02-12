@@ -34,9 +34,23 @@ bool DynamicCalibrationWorker::runOnHost() const {
     return runOnHostVar;
 }
 
+void DynamicCalibrationWorker::loadData(unsigned int numImages) {
+    for(unsigned int i = 0; i < numImages; i++) {
+        dynamicCalibrationCommandQueue->send(DCC::loadImage());
+        coverageQueue->get<dai::CoverageData>();  // wait until the data are loaded
+    }
+}
+
+std::shared_ptr<dai::CalibrationMetrics> DynamicCalibrationWorker::getMetrics(std::shared_ptr<dai::CalibrationHandler> calibration) {
+    dynamicCalibrationCommandQueue->send(DCC::computeCalibrationMetrics(*calibration));
+    return metricsQueue->get<dai::CalibrationMetrics>();
+}
+
 void DynamicCalibrationWorker::buildInternalQueues() {
     // TODO check left right inputs
-    dynamicCalibrationCalibrationQueue = dynamicCalibration->calibrationOutput.createOutputQueue();
+    dynamicCalibrationQueue = dynamicCalibration->calibrationOutput.createOutputQueue();
+    coverageQueue = dynamicCalibration->coverageOutput.createOutputQueue();
+    metricsQueue = dynamicCalibration->metricsOutput.createOutputQueue();
     dynamicCalibrationCommandQueue = dynamicCalibration->inputControl.createInputQueue();
     gateControlQueue = gate->inputControl.createInputQueue();
     sync->out.link(gate->input);
@@ -47,70 +61,61 @@ void DynamicCalibrationWorker::buildInternal() {
     logger = pimpl->logger;
 }
 
-bool DynamicCalibrationWorker::isNewCalibrationOK(std::shared_ptr<dai::DynamicCalibrationResult> calibrationResult) {
-    if(!calibrationResult) {
-        return false;
-    }
-    if(!calibrationResult->calibrationData) {
-        return false;
-    }
-    if(calibrationResult->calibrationData->calibrationDifference.sampsonErrorNew > initialConfig->sampsonErrorThreshold) {
-        return false;
-    }
-    // TODO IMPLEMENT THE LOGIC
-    // validate on a subsets? here or in DCL?
-    // check fillrate ?
-    return true;
-}
-
-// Check the current calibration
-bool DynamicCalibrationWorker::checkCalibration() {
-    // TODO IMPLEMENT THE LOGIC
-    // Sampson error OK?
-    // Fillrate OK?
-    return false;
-}
-
-void DynamicCalibrationWorker::updateCalibration() {
-    bool succesfullyRecalibrated = false;
+std::shared_ptr<dai::CalibrationHandler> DynamicCalibrationWorker::getNewCalibration(unsigned int maxNumIteration) {
     gateControlQueue->send(dai::GateControl::openGate());
-    while(!succesfullyRecalibrated) {
+    for(unsigned int i = 0; i < maxNumIteration; i++) {
         dynamicCalibrationCommandQueue->send(DCC::startCalibration());
-
         bool dataCollected = false;
         while(!dataCollected) {
-            auto dynCalibrationResult = dynamicCalibrationCalibrationQueue->get<dai::DynamicCalibrationResult>();
+            auto dynCalibrationResult = dynamicCalibrationQueue->get<dai::DynamicCalibrationResult>();
             if(dynCalibrationResult->calibrationData) {
                 dataCollected = true;
             }
-            // Check that the incomming calibration is OK
-            if(isNewCalibrationOK(dynCalibrationResult)) {
-                succesfullyRecalibrated = true;
-                dynamicCalibrationCommandQueue->send(DCC::applyCalibration(dynCalibrationResult->calibrationData->newCalibration));
-                logger->info("Recalibrated");
+
+            if(dynCalibrationResult->calibrationData.value().dataQuality > initialConfig->dataQualityThreshold) {
+                return std::make_shared<dai::CalibrationHandler>(dynCalibrationResult->calibrationData.value().newCalibration);
             }
         }
         dynamicCalibrationCommandQueue->send(DCC::resetData());
     }
     gateControlQueue->send(dai::GateControl::closeGate());
+    return nullptr;
+}
+
+bool DynamicCalibrationWorker::recalibrate(unsigned int& numIterations, std::shared_ptr<dai::CalibrationHandler> calibration) {
+    if(numIterations > initialConfig->maxIterations) return false;
+    dynamicCalibrationCommandQueue->send(DCC::resetData());
+    loadData(3);
+    auto metrics = getMetrics(calibration);
+    if(metrics->dataQuality > initialConfig->dataQualityThreshold) {
+        if(metrics->calibrationConfidence > initialConfig->calibrationConfidenceThreshold) {
+            device->flashCalibration(*calibration);
+            return true;
+        } else {
+            auto newCalibration = getNewCalibration(initialConfig->maxIterations);
+            return recalibrate(++numIterations, newCalibration);
+        }
+    } else {
+        return recalibrate(++numIterations, calibration);
+    }
+}
+
+bool DynamicCalibrationWorker::updateCalibration() {
+    auto calibration = std::make_shared<dai::CalibrationHandler>(device->getCalibration());
+    unsigned int numIterations = 0;
+    return recalibrate(numIterations, calibration);
 }
 
 void DynamicCalibrationWorker::runContinuousMode() {
-    while(true) {
-        auto isCalibrationOK = checkCalibration();
-        if(!isCalibrationOK) {
-            updateCalibration();
-        }
+    while(isRunning()) {
+        updateCalibration();
         // trigger also by a low fillrate?
         std::this_thread::sleep_for(std::chrono::seconds(initialConfig->sleepingTime));
     }
 }
 
 void DynamicCalibrationWorker::runOnStartMode() {
-    auto isCalibrationOK = checkCalibration();
-    if(!isCalibrationOK) {
-        updateCalibration();
-    }
+    updateCalibration();
 }
 
 void DynamicCalibrationWorker::run() {

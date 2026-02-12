@@ -70,19 +70,27 @@ class DynamicCalibrationWorker : public DeviceNodeCRTP<DeviceNode, DynamicCalibr
 
     bool checkCalibration();
 
-    void updateCalibration();
+    bool updateCalibration();
 
     void runContinuousMode();
 
     void runOnStartMode();
 
-    bool isNewCalibrationOK(std::shared_ptr<dai::DynamicCalibrationResult> calibrationResult);
+    bool recalibrate(unsigned int& numIterations, std::shared_ptr<dai::CalibrationHandler> calibration);
+
+    std::shared_ptr<dai::CalibrationHandler> getNewCalibration(unsigned int maxNumIteration);
+
+    void loadData(unsigned int numImages);
+
+    std::shared_ptr<dai::CalibrationMetrics> getMetrics(std::shared_ptr<dai::CalibrationHandler> calibration);
 
     DynamicCalibrationWorkerProperties properties;
 
     std::shared_ptr<dai::InputQueue> gateControlQueue;
     std::shared_ptr<dai::InputQueue> dynamicCalibrationCommandQueue;
-    std::shared_ptr<dai::MessageQueue> dynamicCalibrationCalibrationQueue;
+    std::shared_ptr<dai::MessageQueue> dynamicCalibrationQueue;
+    std::shared_ptr<dai::MessageQueue> metricsQueue;
+    std::shared_ptr<dai::MessageQueue> coverageQueue;
 
     bool runOnHostVar = true;
 

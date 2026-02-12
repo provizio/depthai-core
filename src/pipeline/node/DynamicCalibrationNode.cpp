@@ -280,6 +280,7 @@ void DynamicCalibration::computeMetrics(const CalibrationHandler& handler) {
     auto metrics = std::make_shared<CalibrationMetrics>();
     metrics->reprojectionError = reprojectionError.value;
     metrics->calibrationConfidence = confidence.value;
+    metrics->dataQuality = 0.5;
     metricsOutput.send(metrics);
 }
 

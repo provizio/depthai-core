@@ -134,6 +134,7 @@ struct CalibrationQuality : public Buffer {
 struct CalibrationMetrics : public Buffer {
     float calibrationConfidence;
     float reprojectionError;
+    float dataQuality;
 };
 
 /**
@@ -162,7 +163,9 @@ struct DynamicCalibrationResult : public Buffer {
         /** Per-metric comparison of new vs old calibration. */
         CalibrationQuality::Data calibrationDifference;
 
-        DEPTHAI_SERIALIZE(Data, newCalibration, currentCalibration, calibrationDifference);
+        float dataQuality;
+
+        DEPTHAI_SERIALIZE(Data, newCalibration, currentCalibration, calibrationDifference, dataQuality);
     };
 
     DynamicCalibrationResult() = default;
