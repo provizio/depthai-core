@@ -17,7 +17,7 @@ struct DynamicCalibrationWorkerConfig : public Buffer {
 
     int sleepingTime = 600;  // 10 minutes
 
-    float calibrationConfidenceThreshold = 0.5;
+    float calibrationConfidenceThreshold = 0.9;
 
     float dataQualityThreshold = 0.5;
 
