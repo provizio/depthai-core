@@ -17,11 +17,11 @@ struct DynamicCalibrationWorkerConfig : public Buffer {
 
     int sleepingTime = 600;  // 10 minutes
 
-    float calibrationConfidenceThreshold = 0.9;
+    float calibrationConfidenceThreshold = 0.5;
 
     float dataQualityThreshold = 0.5;
 
-    unsigned int maxIterations = 3;
+    unsigned int maxIterations = 10;
 
     void serialize(std::vector<std::uint8_t>& metadata, DatatypeEnum& datatype) const override;
 

@@ -275,12 +275,21 @@ void DynamicCalibration::setCalibration(CalibrationHandler& handler) {
 
 void DynamicCalibration::computeMetrics(const CalibrationHandler& handler) {
     auto [calibA, calibB] = DclUtils::convertDaiCalibrationToDcl(handler, daiSocketA, daiSocketB, resolutionA, resolutionB);
-    auto reprojectionError = pimplDCL->dynCalibImpl.computeReprojectionError(calibA, calibB, pimplDCL->sensorA, pimplDCL->sensorB);
-    auto confidence = pimplDCL->dynCalibImpl.computeCalibrationConfidence(calibA, calibB, pimplDCL->sensorA, pimplDCL->sensorB);
+    auto dataQuality = pimplDCL->dynCalibImpl.computeDataQuality(pimplDCL->sensorA, pimplDCL->sensorB);
+    // auto reprojectionError = pimplDCL->dynCalibImpl.computeReprojectionError(pimplDCL->sensorA, pimplDCL->sensorB);
+    auto calibrationConfidence = pimplDCL->dynCalibImpl.computeCalibrationConfidence(pimplDCL->sensorA, pimplDCL->sensorB);
     auto metrics = std::make_shared<CalibrationMetrics>();
-    metrics->reprojectionError = reprojectionError.value;
-    metrics->calibrationConfidence = confidence.value;
-    metrics->dataQuality = 0.5;
+    // metrics->reprojectionError = reprojectionError.value;
+    if(!dataQuality.passed()) {
+        metrics->dataQuality = 0.;
+    } else {
+        metrics->dataQuality = dataQuality.value;
+    }
+    if(!calibrationConfidence.passed()) {
+        metrics->calibrationConfidence = 0.;
+    } else {
+        metrics->calibrationConfidence = calibrationConfidence.value;
+    }
     metricsOutput.send(metrics);
 }
 

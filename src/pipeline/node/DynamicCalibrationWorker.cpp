@@ -70,10 +70,9 @@ std::shared_ptr<dai::CalibrationHandler> DynamicCalibrationWorker::getNewCalibra
             auto dynCalibrationResult = dynamicCalibrationQueue->get<dai::DynamicCalibrationResult>();
             if(dynCalibrationResult->calibrationData) {
                 dataCollected = true;
-            }
-
-            if(dynCalibrationResult->calibrationData.value().dataQuality > initialConfig->dataQualityThreshold) {
-                return std::make_shared<dai::CalibrationHandler>(dynCalibrationResult->calibrationData.value().newCalibration);
+                if(dynCalibrationResult->calibrationData.value().dataQuality > initialConfig->dataQualityThreshold) {
+                    return std::make_shared<dai::CalibrationHandler>(dynCalibrationResult->calibrationData.value().newCalibration);
+                }
             }
         }
         dynamicCalibrationCommandQueue->send(DCC::resetData());
@@ -85,8 +84,11 @@ std::shared_ptr<dai::CalibrationHandler> DynamicCalibrationWorker::getNewCalibra
 bool DynamicCalibrationWorker::recalibrate(unsigned int& numIterations, std::shared_ptr<dai::CalibrationHandler> calibration) {
     if(numIterations > initialConfig->maxIterations) return false;
     dynamicCalibrationCommandQueue->send(DCC::resetData());
-    loadData(3);
+    loadData(5);
     auto metrics = getMetrics(calibration);
+    logger->info("Iteration = {}", numIterations);
+    logger->info("          dataQuality = {}", metrics->dataQuality);
+    logger->info("          calibrationConfidence = {}", metrics->calibrationConfidence);
     if(metrics->dataQuality > initialConfig->dataQualityThreshold) {
         if(metrics->calibrationConfidence > initialConfig->calibrationConfidenceThreshold) {
             device->flashCalibration(*calibration);

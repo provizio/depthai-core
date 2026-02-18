@@ -163,7 +163,7 @@ struct DynamicCalibrationResult : public Buffer {
         /** Per-metric comparison of new vs old calibration. */
         CalibrationQuality::Data calibrationDifference;
 
-        float dataQuality;
+        float dataQuality = 1.0;
 
         DEPTHAI_SERIALIZE(Data, newCalibration, currentCalibration, calibrationDifference, dataQuality);
     };
