@@ -26,6 +26,17 @@ void bind_dynamic_calibration_worker(pybind11::module& m, void* pCallstack) {
 
     // Actual bindings
     ///////////////////////////////////////////////////////////////////////
-    dynamicCalibrationWorker.def(
-        "build", &DynamicCalibrationWorker::build, py::arg("cameraLeft"), py::arg("cameraRight"), DOC(dai, node, DynamicCalibrationWorker, build));
+    dynamicCalibrationWorker
+        .def("build", &DynamicCalibrationWorker::build, py::arg("cameraLeft"), py::arg("cameraRight"), DOC(dai, node, DynamicCalibrationWorker, build))
+        .def_property(
+            "initialConfig",
+            [](DynamicCalibrationWorker& self) -> std::shared_ptr<DynamicCalibrationWorkerConfig> {
+                // Explicitly returning the shared_ptr member
+                return self.initialConfig;
+            },
+            [](DynamicCalibrationWorker& self, std::shared_ptr<DynamicCalibrationWorkerConfig> cfg) {
+                // Assigning the shared_ptr directly
+                self.initialConfig = cfg;
+            },
+            DOC(dai, node, DynamicCalibrationWorker, initialConfig));
 }
