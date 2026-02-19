@@ -68,6 +68,7 @@ std::shared_ptr<dai::CalibrationHandler> DynamicCalibrationWorker::getNewCalibra
         bool dataCollected = false;
         while(!dataCollected) {
             auto dynCalibrationResult = dynamicCalibrationQueue->get<dai::DynamicCalibrationResult>();
+            coverageQueue->tryGet<dai::CoverageData>();
             if(dynCalibrationResult->calibrationData) {
                 dataCollected = true;
                 if(dynCalibrationResult->calibrationData.value().dataQuality > initialConfig->dataQualityThreshold) {
