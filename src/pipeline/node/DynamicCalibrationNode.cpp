@@ -275,7 +275,7 @@ void DynamicCalibration::setCalibration(CalibrationHandler& handler) {
 
 void DynamicCalibration::computeMetrics(const CalibrationHandler& handler) {
     auto [calibA, calibB] = DclUtils::convertDaiCalibrationToDcl(handler, daiSocketA, daiSocketB, resolutionA, resolutionB);
-    auto dataQuality = pimplDCL->dynCalibImpl.computeDataQuality(calibA, calibB, pimplDCL->sensorA, pimplDCL->sensorB);
+    auto dataQuality = pimplDCL->dynCalibImpl.computeDataQuality(pimplDCL->sensorA, pimplDCL->sensorB);
     // auto reprojectionError = pimplDCL->dynCalibImpl.computeReprojectionError(pimplDCL->sensorA, pimplDCL->sensorB);
     auto calibrationConfidence = pimplDCL->dynCalibImpl.computeCalibrationConfidence(calibA, calibB, pimplDCL->sensorA, pimplDCL->sensorB);
     auto metrics = std::make_shared<CalibrationMetrics>();
