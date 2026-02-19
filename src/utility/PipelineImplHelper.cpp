@@ -92,7 +92,7 @@ void PipelineImplHelper::setupHolisticRecordAndReplay() {
                         }
                     }
 #else
-                    recordConfig.state = RecordConfig::RecordReplayState::NONE;
+                    pipeline->recordConfig.state = RecordConfig::RecordReplayState::NONE;
                     if(!recordPath.empty() || !replayPath.empty()) {
                         Logging::getInstance().logger.warn("Merged target is required to use holistic record/replay.");
                     }
