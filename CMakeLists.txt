@@ -329,7 +329,6 @@ set(TARGET_CORE_SOURCES
     src/pipeline/node/NeuralDepth.cpp
     src/pipeline/node/NeuralAssistedStereo.cpp
     src/pipeline/node/Rectification.cpp
-    src/pipeline/node/ImageFilters.cpp
     src/pipeline/datatype/Buffer.cpp
     src/pipeline/datatype/ImgFrame.cpp
     src/pipeline/datatype/ImgTransformations.cpp
@@ -442,6 +441,7 @@ set(TARGET_OPENCV_SOURCES
     src/pipeline/node/host/HostCamera.cpp
     src/pipeline/node/host/Record.cpp
     src/pipeline/node/host/Replay.cpp
+    src/pipeline/node/ImageFilters.cpp
     src/opencv/RecordReplay.cpp
     src/opencv/HolisticRecordReplay.cpp
 )
