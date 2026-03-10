@@ -4,8 +4,11 @@
 #include <cstdint>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <opencv2/opencv.hpp>
 #include <utility/ErrorMacros.hpp>
+
+#if defined(DEPTHAI_HAVE_OPENCV_SUPPORT)
+    #include <opencv2/opencv.hpp>
+#endif
 
 #include "depthai/depthai.hpp"
 #include "pipeline/ThreadedNodeImpl.hpp"
@@ -13,6 +16,71 @@
 
 namespace dai {
 namespace node {
+
+#if !defined(DEPTHAI_HAVE_OPENCV_SUPPORT)
+
+std::shared_ptr<ImageFilters> ImageFilters::build(Node::Output& input, ImageFiltersPresetMode presetMode) {
+    input.link(this->input);
+    setDefaultProfilePreset(presetMode);
+    return std::static_pointer_cast<ImageFilters>(shared_from_this());
+}
+
+std::shared_ptr<ImageFilters> ImageFilters::build(ImageFiltersPresetMode presetMode) {
+    setDefaultProfilePreset(presetMode);
+    return std::static_pointer_cast<ImageFilters>(shared_from_this());
+}
+
+void ImageFilters::run() {
+    throw std::runtime_error("ImageFilters node requires OpenCV support to run. Please enable OpenCV support in your build configuration.");
+}
+
+bool ImageFilters::runOnHost() const {
+    return runOnHostVar;
+}
+
+void ImageFilters::setRunOnHost(bool runOnHost) {
+    if(device && device->getPlatform() == Platform::RVC2 && !runOnHost) {
+        DAI_CHECK_V(false, "ImageFilters: Running on device is not supported on RVC2");
+    }
+    runOnHostVar = runOnHost;
+}
+
+void ImageFilters::setDefaultProfilePreset(ImageFiltersPresetMode mode) {
+    initialConfig->setProfilePreset(mode);
+}
+
+std::shared_ptr<ToFDepthConfidenceFilter> ToFDepthConfidenceFilter::build(Node::Output& depth, Node::Output& amplitude, ImageFiltersPresetMode presetMode) {
+    depth.link(this->depth);
+    amplitude.link(this->amplitude);
+    setDefaultProfilePreset(presetMode);
+    return std::static_pointer_cast<ToFDepthConfidenceFilter>(shared_from_this());
+}
+
+std::shared_ptr<ToFDepthConfidenceFilter> ToFDepthConfidenceFilter::build(ImageFiltersPresetMode presetMode) {
+    setDefaultProfilePreset(presetMode);
+    return std::static_pointer_cast<ToFDepthConfidenceFilter>(shared_from_this());
+}
+
+void ToFDepthConfidenceFilter::run() {
+    throw std::runtime_error("ToFDepthConfidenceFilter node requires OpenCV support to run. Please enable OpenCV support in your build configuration.");
+}
+
+void ToFDepthConfidenceFilter::setRunOnHost(bool runOnHost) {
+    if(device && device->getPlatform() == Platform::RVC2 && !runOnHost) {
+        DAI_CHECK_V(false, "DepthConfidenceFilter: Running on device is not supported on RVC2");
+    }
+    runOnHostVar = runOnHost;
+}
+
+bool ToFDepthConfidenceFilter::runOnHost() const {
+    return runOnHostVar;
+}
+
+void ToFDepthConfidenceFilter::setDefaultProfilePreset(ImageFiltersPresetMode mode) {
+    initialConfig->setProfilePreset(mode);
+}
+
+#else // DEPTHAI_HAVE_OPENCV_SUPPORT
 
 namespace {
 
@@ -1042,6 +1110,8 @@ bool ToFDepthConfidenceFilter::runOnHost() const {
 void ToFDepthConfidenceFilter::setDefaultProfilePreset(ImageFiltersPresetMode mode) {
     initialConfig->setProfilePreset(mode);
 }
+
+#endif // DEPTHAI_HAVE_OPENCV_SUPPORT
 
 }  // namespace node
 }  // namespace dai

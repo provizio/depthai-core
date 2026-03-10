@@ -28,6 +28,14 @@ bool Rectification::runOnHost() const {
 }
 
 #if !defined(DEPTHAI_HAVE_OPENCV_SUPPORT)
+CalibrationHandler Rectification::getCalibrationData() const {
+    if(device) {
+        return device->readCalibration();
+    } else {
+        return getParentPipeline().getCalibrationData();
+    }
+}
+
 void Rectification::run() {
     throw std::runtime_error("Rectification node requires OpenCV support to run. Please enable OpenCV support in your build configuration.");
 }
