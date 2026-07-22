@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <optional>
+#include <thread>
 
 #include "depthai/utility/PipelineEventDispatcher.hpp"
 #include "pipeline/ThreadedNodeImpl.hpp"
@@ -62,7 +63,13 @@ void ThreadedNode::start() {
 }
 
 void ThreadedNode::wait() {
-    if(thread.joinable()) thread.join();
+    // The node's own thread can get here: when run() throws, the catch handler calls
+    // stopPipeline(), and if the temporary Pipeline it holds is the last owner,
+    // ~PipelineImpl -> wait() runs on this very thread. Joining the current thread
+    // would throw std::system_error (resource deadlock avoided) and terminate the
+    // process, so only join from other threads; JoiningThread detaches on
+    // self-destruction to keep the teardown safe.
+    if(thread.joinable() && thread.get_id() != std::this_thread::get_id()) thread.join();
 }
 
 void ThreadedNode::stop() {
